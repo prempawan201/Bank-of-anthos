@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: balancereader
+spec:
+  selector:
+    matchLabels:
+      app: balancereader
+  template:
+    metadata:
+      labels:
+        app: balancereader
+    spec:
+      serviceAccountName: default
+      containers:
+        - name: balancereader
+          image: "{{ .Values.acrLoginServer }}/balancereader:{{ .Values.imageTag }}"
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef: { name: environment-config }
+            - configMapRef: { name: ledger-db-config }
+          env:
+            - { name: PORT, value: "8080" }
+            - { name: ENABLE_TRACING, value: "false" }
+            - { name: ENABLE_METRICS, value: "false" }
+            - { name: LOG_LEVEL, value: "info" }
+            - { name: VERSION, value: "dev" }
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: keys
+              mountPath: /root/.ssh
+              readOnly: true
+            # - { name: publickey, mountPath: /root/.ssh, readOnly: true }
+      volumes:
+          - name: keys
+            csi:
+              driver: secrets-store.csi.k8s.io
+              readOnly: true
+              volumeAttributes:
+                secretProviderClass: jwt-key-provider
+        # - name: publickey
+        #   secret:
+        #     secretName: jwt-key
+        #     items:
+        #       - { key: jwtRS256.key.pub, path: publickey }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: balancereader
+spec:
+  type: ClusterIP
+  selector:
+    app: balancereader
+  ports:
+    - port: 8080
+      targetPort: 8080

@@ -1,0 +1,193 @@
+parameters:
+  - name: serviceName
+    type: string
+    # no default — required
+
+  - name: dockerfilePath
+    type: string
+    default: 'Dockerfile'
+
+  - name: buildContext
+    type: string
+    default: '.'
+
+  # ── ACR targeting — no defaults; caller must supply for their env ──
+  # Dev: acrbankofanthos8459 / acrbankofanthos8459.azurecr.io
+  # Staging: acrboastaging8459 / acrboastaging8459.azurecr.io
+  - name: acrName
+    type: string
+    # no default — required
+
+  - name: acrLoginServer
+    type: string
+    # no default — required
+
+  # Dev: sc-boa-acr-dev
+  # Staging: sc-boa-acr-staging (create after staging apply)
+  - name: dockerRegistryServiceConnection
+    type: string
+    # no default — required
+
+  # Dev: dev  Staging: staging  Prod: prod
+  - name: envTag
+    type: string
+    # no default — required
+
+  # Dev: '0' (report only)  Staging/Prod: '1' (gate — fails build on HIGH/CRITICAL)
+  - name: failOnVuln
+    type: string
+    default: '0'
+    # intentional default: safe to report-only; staging explicitly overrides to '1'
+
+  - name: runSonar
+    type: boolean
+    default: false
+
+  - name: sonarServiceConnection
+    type: string
+    default: ''
+
+  - name: sonarProjectKey
+    type: string
+    default: ''
+
+steps:
+  - task: Docker@2
+    displayName: 'Build ${{ parameters.serviceName }}:$(Build.BuildId)'
+    inputs:
+      containerRegistry: '${{ parameters.dockerRegistryServiceConnection }}'
+      repository: '${{ parameters.serviceName }}'
+      command: build
+      Dockerfile: '${{ parameters.dockerfilePath }}'
+      buildContext: '${{ parameters.buildContext }}'
+      tags: |
+        $(Build.BuildId)
+        ${{ parameters.envTag }}
+      addPipelineData: true
+      addBaseImageData: true
+
+  - task: Trivy@1
+    displayName: 'Trivy scan ${{ parameters.serviceName }}:$(Build.BuildId)'
+    inputs:
+      version: 'latest'
+      image: '${{ parameters.acrLoginServer }}/${{ parameters.serviceName }}:$(Build.BuildId)'
+      severities: 'HIGH,CRITICAL'
+      ignoreUnfixed: true
+      exitCode: ${{ parameters.failOnVuln }}
+
+  - ${{ if eq(parameters.runSonar, true) }}:
+    - task: SonarQubePrepare@6
+      displayName: 'SonarQube — Prepare'
+      inputs:
+        SonarQube: '${{ parameters.sonarServiceConnection }}'
+        scannerMode: CLI
+        configMode: manual
+        cliProjectKey: '${{ parameters.sonarProjectKey }}'
+        cliProjectName: '${{ parameters.serviceName }}'
+    - task: SonarQubeAnalyze@6
+      displayName: 'SonarQube — Analyze'
+    - task: SonarQubePublish@6
+      displayName: 'SonarQube — Quality gate'
+      inputs:
+        pollingTimeoutSec: '300'
+
+  - task: Docker@2
+    displayName: 'Push ${{ parameters.serviceName }}:$(Build.BuildId) and :${{ parameters.envTag }}'
+    inputs:
+      containerRegistry: '${{ parameters.dockerRegistryServiceConnection }}'
+      repository: '${{ parameters.serviceName }}'
+      command: push
+      tags: |
+        $(Build.BuildId)
+        ${{ parameters.envTag }}
+
+
+
+
+
+
+
+
+# parameters:
+#   - name: serviceName
+#     type: string
+#   - name: dockerfilePath
+#     type: string
+#     default: 'Dockerfile'
+#   - name: buildContext
+#     type: string
+#     default: '.'
+#   - name: acrName
+#     type: string
+#     default: 'acrbankofanthos8459'
+#   - name: acrLoginServer
+#     type: string
+#     default: 'acrbankofanthos8459.azurecr.io'
+#   - name: dockerRegistryServiceConnection
+#     type: string
+#     default: 'sc-boa-acr-dev'
+#   - name: envTag
+#     type: string
+#     default: 'dev'
+#   - name: failOnVuln
+#     type: string
+#     default: '0'
+#   - name: runSonar
+#     type: boolean
+#     default: false
+#   - name: sonarServiceConnection
+#     type: string
+#     default: ''
+#   - name: sonarProjectKey
+#     type: string
+#     default: ''
+
+# steps:
+#   - task: Docker@2
+#     displayName: 'Build ${{ parameters.serviceName }}:$(Build.BuildId)'
+#     inputs:
+#       containerRegistry: '${{ parameters.dockerRegistryServiceConnection }}'
+#       repository: '${{ parameters.serviceName }}'
+#       command: build
+#       Dockerfile: '${{ parameters.dockerfilePath }}'
+#       buildContext: '${{ parameters.buildContext }}'
+#       tags: |
+#         $(Build.BuildId)
+#         ${{ parameters.envTag }}
+#       addPipelineData: true
+#       addBaseImageData: true
+
+#   - task: Trivy@1
+#     displayName: 'Trivy scan ${{ parameters.serviceName }}:$(Build.BuildId)'
+#     inputs:
+#       version: 'latest'
+#       image: '${{ parameters.acrLoginServer }}/${{ parameters.serviceName }}:$(Build.BuildId)'
+#       severities: 'HIGH,CRITICAL'
+#       ignoreUnfixed: true
+#       exitCode: ${{ parameters.failOnVuln }}
+
+#   - ${{ if eq(parameters.runSonar, true) }}:
+#     - task: SonarQubePrepare@6
+#       displayName: 'SonarQube — Prepare'
+#       inputs:
+#         SonarQube: '${{ parameters.sonarServiceConnection }}'
+#         scannerMode: CLI
+#         configMode: manual
+#         cliProjectKey: '${{ parameters.sonarProjectKey }}'
+#         cliProjectName: '${{ parameters.serviceName }}'
+#     - task: SonarQubeAnalyze@6
+#       displayName: 'SonarQube — Analyze'
+#     - task: SonarQubePublish@6
+#       displayName: 'SonarQube — Quality gate'
+#       inputs:
+#         pollingTimeoutSec: '300'
+
+#   - task: Docker@2
+#     displayName: 'Push ${{ parameters.serviceName }}:$(Build.BuildId) and :${{ parameters.envTag }}'
+#     inputs:
+#       containerRegistry: '${{ parameters.dockerRegistryServiceConnection }}'
+#       repository: '${{ parameters.serviceName }}'
+#       command: push
+#       tags: |
+#         $(Build.BuildId)
+#         ${{ parameters.envTag }}

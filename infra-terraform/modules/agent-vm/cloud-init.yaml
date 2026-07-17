@@ -1,0 +1,130 @@
+#cloud-config
+# ============================================================
+# agent-vm cloud-init — bootstraps the self-hosted ADO agent.
+# Branches on ${auth_mode}: "pat" or "managed_identity".
+#
+# PAT mode: token arrives via customData (var.azdo_pat, a secure
+# pipeline variable). NO Key Vault read — keeps hub self-contained
+# and avoids inverting the hub→spoke dependency.
+#
+# ORDER: register the agent FIRST (critical path), install tooling
+# AFTER and non-fatally. A tooling failure must never prevent the
+# agent from coming online (the gpg-abort lesson).
+# ============================================================
+
+package_update: true
+package_upgrade: true
+packages:
+  - curl
+  - jq
+  - unzip
+  - apt-transport-https
+  - ca-certificates
+  - gnupg
+  - lsb-release
+
+write_files:
+  - path: /opt/agent/install.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      # clean Ubuntu images lack this dir; gpg keyring writes need it
+      mkdir -p /etc/apt/keyrings
+
+      # Azure CLI — needed by pipeline tasks, install early (cheap, reliable)
+      curl -fsSL https://aka.ms/InstallAzureCLIDeb | bash
+
+      # ========================================================
+      # CRITICAL PATH: download + register the agent FIRST.
+      # Nothing tooling-related runs before the agent is online.
+      # ========================================================
+      mkdir -p /opt/azagent && cd /opt/azagent
+      AGENT_VERSION=$(curl -s https://api.github.com/repos/microsoft/azure-pipelines-agent/releases/latest | jq -r '.tag_name' | sed 's/v//')
+      # download.agent.dev.azure.com (vstsagentpackage.azureedge.net is dead)
+      curl -fL "https://download.agent.dev.azure.com/agent/$${AGENT_VERSION}/vsts-agent-linux-x64-$${AGENT_VERSION}.tar.gz" -o agent.tar.gz
+      tar -xzf agent.tar.gz
+      chown -R ${admin_user}:${admin_user} /opt/azagent
+
+      if [ "${auth_mode}" = "pat" ]; then
+        # PAT delivered via customData (TF_VAR_azdo_pat secure variable).
+        # No IMDS, no Key Vault. The PAT is rendered into this script by
+        # Terraform's templatefile() at apply time.
+        PAT="${azdo_pat}"
+        if [ -z "$PAT" ] || [ "$PAT" = "null" ]; then
+          echo "FATAL: azdo_pat empty — set TF_VAR_azdo_pat as a SECRET pipeline variable in tf-platform" >&2
+          exit 1
+        fi
+        sudo -u ${admin_user} ./config.sh \
+          --unattended \
+          --url ${azdo_url} \
+          --auth pat \
+          --token "$PAT" \
+          --pool ${azdo_pool} \
+          --agent "$(hostname)" \
+          --replace \
+          --acceptTeeEula
+      else
+        # MID mode: agent v4.x has NO working --auth managedidentity.
+        # Fetch an Azure DevOps-scoped token from the VM's UAMI (IMDS),
+        # then register with --auth pat using that bearer token.
+        # 499b84ac-1321-427f-aa17-267ca6975798 = the Azure DevOps resource ID.
+        # NOTE: requires the UAMI to be enrolled in the ADO org + granted
+        # Agent Pools permission (one-time org bootstrap). If that bootstrap
+        # is missing, IMDS returns a valid token but ADO REJECTS registration.
+        ADO_TOKEN=$(curl -s -H Metadata:true \
+          "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=499b84ac-1321-427f-aa17-267ca6975798&client_id=${uami_client_id}" \
+          | jq -r '.access_token')
+        if [ -z "$ADO_TOKEN" ] || [ "$ADO_TOKEN" = "null" ]; then
+          echo "FATAL: could not fetch ADO token from IMDS — check UAMI is attached to the VM" >&2
+          exit 1
+        fi
+        sudo -u ${admin_user} ./config.sh \
+          --unattended \
+          --url ${azdo_url} \
+          --auth pat \
+          --token "$ADO_TOKEN" \
+          --pool ${azdo_pool} \
+          --agent "$(hostname)" \
+          --replace \
+          --acceptTeeEula
+      fi
+
+      ./svc.sh install ${admin_user}
+      ./svc.sh start
+
+      # ========================================================
+      # TOOLING: non-critical. set +e so a failure here can NEVER
+      # abort the script after the agent is already registered.
+      # ========================================================
+      set +e
+
+      # Terraform
+      curl -fsSL https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip -o /tmp/tf.zip
+      unzip -o /tmp/tf.zip -d /usr/local/bin/
+      chmod +x /usr/local/bin/terraform
+
+      # kubectl
+      curl -fLO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+      install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+      rm -f kubectl
+
+      # Helm  (-fsSL on the signing key curl — was bare curl, caused gpg abort)
+      curl -fsSL https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+      apt-get update
+      apt-get install -y helm
+
+      # Docker
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list
+      apt-get update
+      apt-get install -y docker-ce docker-ce-cli containerd.io
+      usermod -aG docker ${admin_user}
+
+      set -e
+      echo "install.sh complete — agent registered, tooling attempted."
+
+runcmd:
+  - bash /opt/agent/install.sh

@@ -1,0 +1,153 @@
+trigger: none
+
+resources:
+  pipelines:
+    - pipeline: frontend-ci
+      source: frontend
+      trigger: true
+    - pipeline: userservice-ci
+      source: userservice
+      trigger: true
+    - pipeline: contacts-ci
+      source: contacts
+      trigger: true
+    - pipeline: balancereader-ci
+      source: balancereader
+      trigger: true
+    - pipeline: ledgerwriter-ci
+      source: ledgerwriter
+      trigger: true
+    - pipeline: transactionhistory-ci
+      source: transactionhistory
+      trigger: true
+    - pipeline: loadgenerator-ci
+      source: loadgenerator
+      trigger: true
+
+pool:
+  name: boa-self-hosted
+
+steps:
+  - checkout: self
+
+  - task: HelmInstaller@1
+    inputs:
+      helmVersionToInstall: 'latest'
+
+  - task: AzureCLI@2
+    displayName: Fetch DB password from Key Vault
+    inputs:
+      azureSubscription: sc-boa-staging
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        set -euo pipefail
+        P=$(az keyvault secret show \
+          --vault-name kv-boa-staging-8459 \
+          --name postgres-admin-password \
+          --query value -o tsv)
+        echo "##vso[task.setvariable variable=PG_PASS;issecret=true]$P"
+
+  - task: Kubernetes@1
+    displayName: Ensure BOA namespace exists
+    inputs:
+     connectionType: Azure Resource Manager
+     azureSubscriptionEndpoint: sc-boa-staging
+     azureResourceGroup: rg-boa-workload-staging-eus2
+     kubernetesCluster: aks-boa-staging-eus2
+     command: apply
+     useConfigurationFile: true
+     inline: |
+       apiVersion: v1
+       kind: Namespace
+       metadata:
+         name: boa
+
+  - task: HelmDeploy@0
+    displayName: Deploy Bank of Anthos to staging AKS
+    inputs:
+      connectionType: Azure Resource Manager
+      azureSubscription: sc-boa-staging
+      azureResourceGroup: rg-boa-workload-staging-eus2
+      kubernetesCluster: aks-boa-staging-eus2
+      namespace: boa
+      command: upgrade
+      chartType: filepath
+      chartPath: charts/bank-of-anthos
+      releaseName: boa
+      valueFile: charts/bank-of-anthos/values-staging.yaml
+      install: true
+      waitForExecution: true
+      arguments: >-
+        --timeout 10m
+        --set accountsDb.password=$(PG_PASS)
+        --set ledgerDb.password=$(PG_PASS)
+
+
+# trigger: none
+
+# resources:
+#   pipelines:
+#     - pipeline: frontend-ci
+#       source: frontend
+#       trigger: true
+#     - pipeline: userservice-ci
+#       source: userservice
+#       trigger: true
+#     - pipeline: contacts-ci
+#       source: contacts
+#       trigger: true
+#     - pipeline: balancereader-ci
+#       source: balancereader
+#       trigger: true
+#     - pipeline: ledgerwriter-ci
+#       source: ledgerwriter
+#       trigger: true
+#     - pipeline: transactionhistory-ci
+#       source: transactionhistory
+#       trigger: true
+#     - pipeline: loadgenerator-ci
+#       source: loadgenerator
+#       trigger: true
+
+# pool:
+#   name: boa-self-hosted
+
+# steps:
+#   - checkout: self
+
+#   - task: HelmInstaller@1
+#     inputs:
+#       helmVersionToInstall: 'latest'
+
+#   - task: Kubernetes@1
+#     displayName: Ensure BOA namespace exists
+#     inputs:
+#      connectionType: Azure Resource Manager
+#      azureSubscriptionEndpoint: sc-boa-staging
+#      azureResourceGroup: rg-boa-workload-staging-eus2
+#      kubernetesCluster: aks-boa-staging-eus2
+#      command: apply
+#      useConfigurationFile: true
+#      inline: |
+#        apiVersion: v1
+#        kind: Namespace
+#        metadata:
+#          name: boa
+
+#   - task: HelmDeploy@0
+#     displayName: Deploy Bank of Anthos to staging AKS
+#     inputs:
+#       connectionType: Azure Resource Manager
+#       azureSubscription: sc-boa-staging
+#       azureResourceGroup: rg-boa-workload-staging-eus2
+#       kubernetesCluster: aks-boa-staging-eus2
+#       namespace: boa
+#       command: upgrade
+#       chartType: filepath
+#       chartPath: charts/bank-of-anthos
+#       releaseName: boa
+#       valueFile: charts/bank-of-anthos/values-staging.yaml
+#       install: true
+#       waitForExecution: true
+#       arguments: --timeout 10m

@@ -1,0 +1,181 @@
+# ============================================================
+# Multi-environment Terraform pipeline
+# ------------------------------------------------------------
+# Drives all five infra envs (hub, dns, dev, staging, prod) via
+# the `environment` parameter. Each env uses its OWN service
+# connection (least-privilege, blast-radius isolation):
+#   hub, dns → sc-boa-hub-dns
+#   dev      → sc-boa-dev
+#   staging  → sc-boa-staging
+#   prod     → sc-boa-prod (+ manual approval via 'prod' environment)
+#
+# Private envs (staging, prod) MUST run on the self-hosted pool —
+# a Microsoft-hosted agent can't reach their private AKS/endpoints.
+# ============================================================
+
+trigger: none
+pr: none
+
+parameters:
+  - name: environment
+    type: string
+    default: dev
+    values: [hub, dns, dev, staging, prod]
+  - name: action
+    type: string
+    default: plan
+    values: [plan, apply, destroy]
+  - name: pool
+    type: string
+    default: microsoft-hosted
+    values: [microsoft-hosted, self-hosted]
+
+variables:
+  # ---- Per-env service connection mapping ----
+  ${{ if or(eq(parameters.environment, 'hub'), eq(parameters.environment, 'dns')) }}:
+    serviceConnection: 'sc-boa-hub-dns'
+  ${{ if eq(parameters.environment, 'dev') }}:
+    serviceConnection: 'sc-boa-dev'
+  ${{ if eq(parameters.environment, 'staging') }}:
+    serviceConnection: 'sc-boa-staging'
+  ${{ if eq(parameters.environment, 'prod') }}:
+    serviceConnection: 'sc-boa-prod'
+
+  tfBackendResourceGroup: 'rg-boa-bootstrap-eus2'
+  tfBackendStorageAccount: 'stboatfstate8459'
+  tfBackendContainer: 'tfstate'
+  workingDir: '$(System.DefaultWorkingDirectory)/environments/${{ parameters.environment }}'
+  stateKey: '${{ parameters.environment }}.tfstate'
+
+  # Workload RG + AKS names — used only by the pre-destroy hook.
+  # dev/staging/prod follow the same naming pattern.
+  workloadRg: 'rg-boa-workload-${{ parameters.environment }}-eus2'
+  aksName: 'aks-boa-${{ parameters.environment }}-eus2'
+
+jobs:
+  # ============================================================
+  # PROD: deployment job tied to the 'prod' environment so the
+  # apply pauses for manual approval (configured in ADO →
+  # Environments → prod → Approvals). plan/destroy still gated by
+  # the action param.
+  # ============================================================
+  - ${{ if eq(parameters.environment, 'prod') }}:
+      - deployment: terraform_prod
+        displayName: 'Terraform (prod — gated)'
+        environment: 'prod'
+        pool:
+          ${{ if eq(parameters.pool, 'self-hosted') }}:
+            name: 'boa-self-hosted'
+          ${{ if eq(parameters.pool, 'microsoft-hosted') }}:
+            vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - template: .pipeline-steps.yml   # see note below
+                  parameters:
+                    action: ${{ parameters.action }}
+                    serviceConnection: $(serviceConnection)
+                    workingDir: $(workingDir)
+                    workloadRg: $(workloadRg)
+                    aksName: $(aksName)
+
+  # ============================================================
+  # NON-PROD: plain job (no approval gate) for hub/dns/dev/staging
+  # ============================================================
+  - ${{ if ne(parameters.environment, 'prod') }}:
+      - job: terraform
+        pool:
+          ${{ if eq(parameters.pool, 'self-hosted') }}:
+            name: 'boa-self-hosted'
+          ${{ if eq(parameters.pool, 'microsoft-hosted') }}:
+            vmImage: 'ubuntu-latest'
+        steps:
+
+          - task: TerraformInstaller@1
+            displayName: 'Install Terraform 1.9.8'
+            inputs:
+              terraformVersion: '1.9.8'
+
+          - task: TerraformTaskV4@4
+            displayName: 'terraform init'
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              workingDirectory: '$(workingDir)'
+              backendServiceArm: '$(serviceConnection)'
+              backendAzureRmResourceGroupName: '$(tfBackendResourceGroup)'
+              backendAzureRmStorageAccountName: '$(tfBackendStorageAccount)'
+              backendAzureRmContainerName: '$(tfBackendContainer)'
+              backendAzureRmKey: '$(stateKey)'
+
+          - task: TerraformTaskV4@4
+            displayName: 'terraform validate'
+            inputs:
+              provider: 'azurerm'
+              command: 'validate'
+              workingDirectory: '$(workingDir)'
+
+          - task: TerraformTaskV4@4
+            displayName: 'terraform plan'
+            inputs:
+              provider: 'azurerm'
+              command: 'plan'
+              workingDirectory: '$(workingDir)'
+              environmentServiceNameAzureRM: '$(serviceConnection)'
+              commandOptions: '-var-file=terraform.tfvars'
+            env:
+              TF_VAR_azdo_pat: $(TF_VAR_azdo_pat)
+
+          # Pre-destroy: delete AKS first to release subnet NICs so the
+          # VNet/subnets can be destroyed cleanly. Parameterized by env
+          # (was hardcoded to dev). Skips if no AKS in this env.
+          - task: AzureCLI@2
+            displayName: 'Pre-destroy — delete AKS first'
+            condition: and(succeeded(), eq('${{ parameters.action }}', 'destroy'))
+            inputs:
+              azureSubscription: '$(serviceConnection)'
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                STATE=$(az aks show -g "$(workloadRg)" -n "$(aksName)" \
+                  --query provisioningState -o tsv 2>/dev/null || echo "NotFound")
+                if [[ "$STATE" == *"NotFound"* ]]; then
+                  echo "No AKS in $(workloadRg) — skipping"
+                  exit 0
+                fi
+                echo "Deleting AKS $(aksName) to release subnet NICs..."
+                az aks delete -g "$(workloadRg)" -n "$(aksName)" --yes
+                while true; do
+                  S=$(az aks show -g "$(workloadRg)" -n "$(aksName)" \
+                    --query provisioningState -o tsv 2>&1 || echo "NotFound")
+                  echo "AKS state: $S"
+                  [[ "$S" == *"NotFound"* ]] && break
+                  sleep 15
+                done
+                echo "AKS deleted. Proceeding to terraform destroy."
+
+          - task: TerraformTaskV4@4
+            displayName: 'terraform apply'
+            condition: and(succeeded(), eq('${{ parameters.action }}', 'apply'))
+            inputs:
+              provider: 'azurerm'
+              command: 'apply'
+              workingDirectory: '$(workingDir)'
+              environmentServiceNameAzureRM: '$(serviceConnection)'
+              commandOptions: '-var-file=terraform.tfvars -auto-approve'
+            env:
+              TF_VAR_azdo_pat: $(TF_VAR_azdo_pat)
+
+          - task: TerraformTaskV4@4
+            displayName: 'terraform destroy'
+            condition: and(succeeded(), eq('${{ parameters.action }}', 'destroy'))
+            inputs:
+              provider: 'azurerm'
+              command: 'destroy'
+              workingDirectory: '$(workingDir)'
+              environmentServiceNameAzureRM: '$(serviceConnection)'
+              commandOptions: '-var-file=terraform.tfvars -auto-approve'
+            env:
+              TF_VAR_azdo_pat: $(TF_VAR_azdo_pat)

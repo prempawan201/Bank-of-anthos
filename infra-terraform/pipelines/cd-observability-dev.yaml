@@ -1,0 +1,55 @@
+# Standalone observability CD. Sibling to cd-bank-of-anthos-helm (9.2).
+# NOT folded into tf-platform, NOT inside the app pipeline.
+trigger:
+  branches:
+    include:
+      - develop
+  paths:
+    include:
+      - charts/observability/**
+
+pr: none                     # CD pipeline; no PR builds
+
+pool:
+  vmImage: ubuntu-latest     # dev uses Microsoft-hosted agents
+
+variables:
+  aksResourceGroup: rg-boa-workload-dev-eus2
+  aksClusterName: aks-boa-dev-eus2
+  releaseName: observability
+  namespace: monitoring
+  chartPath: charts/observability
+
+steps:
+  - checkout: self
+
+  - task: HelmInstaller@1
+    displayName: Install pinned Helm
+    inputs:
+      helmVersionToInstall: 3.16.2
+
+  # No task equivalent for dependency build of an umbrella chart -> script justified.
+  - script: |
+      helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+      helm repo update
+      helm dependency build $(chartPath)
+    displayName: Vendor pinned kube-prometheus-stack dependency
+
+  - task: HelmDeploy@0
+    displayName: Deploy observability stack to dev AKS
+    inputs:
+      connectionType: Azure Resource Manager
+      azureSubscription: sc-boa-dev
+      azureResourceGroup: $(aksResourceGroup)
+      kubernetesCluster: $(aksClusterName)
+      namespace: $(namespace)
+      command: upgrade
+      chartType: FilePath
+      chartPath: $(chartPath)
+      releaseName: $(releaseName)
+      install: true
+      valueFile: $(chartPath)/values-dev.yaml
+      arguments: >-
+        --create-namespace
+        --wait
+        --timeout 10m

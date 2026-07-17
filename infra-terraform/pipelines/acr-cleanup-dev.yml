@@ -1,0 +1,63 @@
+schedules:
+  - cron: '30 16 * * *'
+    displayName: Nightly ACR cleanup (dev)
+    branches:
+      include:
+        - develop
+    always: true
+
+trigger: none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  acrName: acrbankofanthos8459
+  keepLast: 3
+
+steps:
+  - task: AzureCLI@2
+    displayName: 'Prune old images — keep last $(keepLast) tags (dev ACR)'
+    inputs:
+      azureSubscription: sc-boa-dev
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        set -euo pipefail
+
+        for REPO in $(az acr repository list -n $(acrName) -o tsv); do
+          echo "=== Repo: $REPO ==="
+
+          # Step 1 — delete untagged (dangling) manifests
+          echo "Pruning untagged manifests..."
+          az acr manifest list-metadata \
+            --registry $(acrName) \
+            --name "$REPO" \
+            -o json \
+          | jq -r '.[] | select(.tags == null or (.tags | length) == 0) | .digest' \
+          | while read -r D; do
+              [ -z "$D" ] && continue
+              echo "  Deleting untagged $REPO@$D"
+              az acr repository delete -n $(acrName) --image "$REPO@$D" --yes
+            done
+
+          # Step 2 — keep last 3 numeric BuildId tags, delete the rest
+          # Never touch env alias tags (dev/staging/prod)
+          echo "Pruning old BuildId tags (keeping last $(keepLast))..."
+          az acr repository show-tags -n $(acrName) \
+            --repository "$REPO" \
+            --orderby time_desc \
+            --query "[?!contains(@, 'dev') && !contains(@, 'staging') && !contains(@, 'prod')]" \
+            -o tsv \
+          | tail -n +$(($(keepLast) + 1)) \
+          | while read -r TAG; do
+              [ -z "$TAG" ] && continue
+              echo "  Deleting old tag $REPO:$TAG"
+              az acr repository delete -n $(acrName) \
+                --image "$REPO:$TAG" --yes
+            done
+
+          echo "Done: $REPO"
+        done
+
+        echo "Cleanup complete."

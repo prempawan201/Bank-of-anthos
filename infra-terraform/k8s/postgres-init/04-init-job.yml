@@ -1,0 +1,78 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: postgres-init
+  namespace: bank-of-anthos
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: postgres-init-sa
+      restartPolicy: OnFailure
+      containers:
+        - name: init
+          image: mcr.microsoft.com/azure-cli:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              apt-get update -qq && apt-get install -y -qq postgresql-client
+
+              ACCESS_TOKEN=$(cat $AZURE_FEDERATED_TOKEN_FILE | python3 -c "
+              import sys, json, urllib.request, urllib.parse
+              token = sys.stdin.read().strip()
+              url = 'https://login.microsoftonline.com/${AZURE_TENANT_ID}/oauth2/v2.0/token'
+              data = urllib.parse.urlencode({
+                'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+                'client_assertion_type': 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
+                'client_assertion': token,
+                'client_id': '${AZURE_CLIENT_ID}',
+                'scope': 'https://vault.azure.net/.default',
+              }).encode()
+              req = urllib.request.Request(url, data=data, method='POST')
+              resp = json.loads(urllib.request.urlopen(req).read())
+              print(resp['access_token'])
+              ")
+
+              ADMIN_PASSWORD=$(curl -s \
+                "https://kv-boa-dev-8459.vault.azure.net/secrets/postgres-admin-password?api-version=7.4" \
+                -H "Authorization: Bearer $ACCESS_TOKEN" | python3 -c \
+                "import sys,json; print(json.load(sys.stdin)['value'])")
+
+              ACCOUNTS_PASSWORD=$(curl -s \
+                "https://kv-boa-dev-8459.vault.azure.net/secrets/postgres-accounts-svc-password?api-version=7.4" \
+                -H "Authorization: Bearer $ACCESS_TOKEN" | python3 -c \
+                "import sys,json; print(json.load(sys.stdin)['value'])")
+
+              LEDGER_PASSWORD=$(curl -s \
+                "https://kv-boa-dev-8459.vault.azure.net/secrets/postgres-ledger-svc-password?api-version=7.4" \
+                -H "Authorization: Bearer $ACCESS_TOKEN" | python3 -c \
+                "import sys,json; print(json.load(sys.stdin)['value'])")
+
+              PGPASSWORD="$ADMIN_PASSWORD" psql \
+                -h psql-boa-dev-8459.postgres.database.azure.com \
+                -U pgadmin -d postgres \
+                -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='accounts_svc')
+                    THEN CREATE ROLE accounts_svc LOGIN PASSWORD '$ACCOUNTS_PASSWORD'; END IF; END \$\$;"
+
+              PGPASSWORD="$ADMIN_PASSWORD" psql \
+                -h psql-boa-dev-8459.postgres.database.azure.com \
+                -U pgadmin -d accounts \
+                -c "GRANT ALL ON SCHEMA public TO accounts_svc;"
+
+              PGPASSWORD="$ADMIN_PASSWORD" psql \
+                -h psql-boa-dev-8459.postgres.database.azure.com \
+                -U pgadmin -d postgres \
+                -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='ledger_svc')
+                    THEN CREATE ROLE ledger_svc LOGIN PASSWORD '$LEDGER_PASSWORD'; END IF; END \$\$;"
+
+              PGPASSWORD="$ADMIN_PASSWORD" psql \
+                -h psql-boa-dev-8459.postgres.database.azure.com \
+                -U pgadmin -d ledger \
+                -c "GRANT ALL ON SCHEMA public TO ledger_svc;"
+
+              echo "Postgres initialization complete."

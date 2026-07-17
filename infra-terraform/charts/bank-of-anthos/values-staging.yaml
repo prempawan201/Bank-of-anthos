@@ -1,0 +1,49 @@
+acrLoginServer: "acrboastaging8459.azurecr.io"
+imageTag: "staging"
+inClusterDatabase: false
+
+tenantId: "3d61c161-b515-4531-8ac0-34bfcdf6be81"
+keyvaultName: "kv-boa-staging-8459"
+csiClientId: "6a608779-dacc-4e96-8626-d6a086c02b72"
+
+# password injected at deploy via --set from KV
+accountsDb:
+  host: "psql-boa-staging-8459.postgres.database.azure.com"
+  database: accounts
+  user: pgadmin
+  password: ""
+  sslmode: require
+
+ledgerDb:
+  host: "psql-boa-staging-8459.postgres.database.azure.com"
+  database: ledger
+  user: pgadmin
+  password: ""
+  sslmode: require
+  
+# # Staging image source
+# acrLoginServer: "acrboastaging8459.azurecr.io"
+# imageTag: "staging"
+
+# # Staging uses real VNet-injected Postgres
+# inClusterDatabase: false
+
+# # Staging Key Vault + its CSI driver identity
+# tenantId: "3d61c161-b515-4531-8ac0-34bfcdf6be81"
+# keyvaultName: "kv-boa-staging-8459"
+# csiClientId: "6a608779-dacc-4e96-8626-d6a086c02b72"
+
+# # Staging Postgres — VNet-injected, private Flexible Server
+# accountsDb:
+#   host: "psql-boa-staging-8459.postgres.database.azure.com"
+#   database: accounts-db          # CONFIRM logical db name on the server
+#   user: <STAGING_DB_USER>        # CONFIRM
+#   password: <STAGING_DB_PASSWORD> # see note
+#   sslmode: require
+
+# ledgerDb:
+#   host: "psql-boa-staging-8459.postgres.database.azure.com"
+#   database: postgresdb           # CONFIRM logical db name on the server
+#   user: <STAGING_DB_USER>        # CONFIRM
+#   password: <STAGING_DB_PASSWORD>
+#   sslmode: require

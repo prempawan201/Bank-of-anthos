@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-sql
+  namespace: bank-of-anthos
+data:
+  init-accounts.sql: |
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'accounts_svc') THEN
+        CREATE ROLE accounts_svc LOGIN PASSWORD 'PLACEHOLDER';
+      END IF;
+    END
+    $$;
+    GRANT CONNECT ON DATABASE accounts TO accounts_svc;
+    \c accounts
+    GRANT USAGE ON SCHEMA public TO accounts_svc;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO accounts_svc;
+    GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO accounts_svc;
+
+  init-ledger.sql: |
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'ledger_svc') THEN
+        CREATE ROLE ledger_svc LOGIN PASSWORD 'PLACEHOLDER';
+      END IF;
+    END
+    $$;
+    GRANT CONNECT ON DATABASE ledger TO ledger_svc;
+    \c ledger
+    GRANT USAGE ON SCHEMA public TO ledger_svc;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ledger_svc;
+    GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ledger_svc;

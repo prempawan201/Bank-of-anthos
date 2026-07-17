@@ -1,0 +1,39 @@
+# apiVersion: batch/v1
+# kind: Job
+# metadata:
+#   name: jwt-secret-bootstrap
+#   annotations:
+#     "helm.sh/hook": pre-install,pre-upgrade
+#     "helm.sh/hook-weight": "-5"
+#     "helm.sh/hook-delete-policy": before-hook-creation
+# spec:
+#   backoffLimit: 3
+#   template:
+#     spec:
+#       serviceAccountName: default
+#       restartPolicy: Never
+#       containers:
+#         - name: bootstrap
+#           image: bitnami/kubectl:latest
+#           command:
+#             - sh
+#             - -c
+#             - |
+#               ls /mnt/secrets
+#               echo "CSI mounted, waiting for jwt-key secret sync..."
+#               until kubectl get secret jwt-key -n boa 2>/dev/null; do
+#                 echo "jwt-key not ready yet, retrying..."
+#                 sleep 2
+#               done
+#               echo "jwt-key confirmed, bootstrap complete"
+#           volumeMounts:
+#             - name: jwt-csi
+#               mountPath: /mnt/secrets
+#               readOnly: true
+#       volumes:
+#         - name: jwt-csi
+#           csi:
+#             driver: secrets-store.csi.k8s.io
+#             readOnly: true
+#             volumeAttributes:
+#               secretProviderClass: jwt-key-provider

@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: accounts-db-config
+data:
+  ACCOUNTS_DB_URI: {{ printf "postgresql://%s:%s@%s:5432/%s?sslmode=%s" .Values.accountsDb.user .Values.accountsDb.password .Values.accountsDb.host .Values.accountsDb.database .Values.accountsDb.sslmode | quote }}
+  POSTGRES_DB: {{ .Values.accountsDb.database | quote }}
+  POSTGRES_USER: {{ .Values.accountsDb.user | quote }}
+  POSTGRES_PASSWORD: {{ .Values.accountsDb.password | quote }}
+{{- if .Values.inClusterDatabase }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: accounts-db
+spec:
+  type: ClusterIP
+  selector:
+    app: accounts-db
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: accounts-db
+spec:
+  replicas: 1
+  serviceName: accounts-db
+  selector:
+    matchLabels:
+      app: accounts-db
+  template:
+    metadata:
+      labels:
+        app: accounts-db
+    spec:
+      serviceAccountName: default
+      containers:
+        - name: accounts-db
+          image: {{ .Values.acrLoginServer }}/accounts-db:{{ .Values.imageTag }}
+          envFrom:
+            - configMapRef:
+                name: environment-config
+            - configMapRef:
+                name: accounts-db-config
+            - configMapRef:
+                name: demo-data-config
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: postgresdb
+              mountPath: /var/lib/postgresql/data
+              subPath: postgres
+      volumes:
+        - name: postgresdb
+          emptyDir: {}
+{{- end }}

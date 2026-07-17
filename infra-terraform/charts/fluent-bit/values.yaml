@@ -1,0 +1,25 @@
+fluent-bit:
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+  tolerations:
+    - key: node-role.kubernetes.io/master
+      operator: Exists
+      effect: NoSchedule
+
+  config:
+    filters: |
+      [FILTER]
+          Name                kubernetes
+          Match               kube.*
+          Merge_Log           On
+          Keep_Log            Off
+          K8S-Logging.Parser  On
+          K8S-Logging.Exclude On
+
+    outputs: ""

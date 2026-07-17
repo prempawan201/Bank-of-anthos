@@ -1,0 +1,30 @@
+# charts/bank-of-anthos/values-dev.yaml
+# Dev environment overrides. Only values that differ from base belong here.
+
+inClusterDatabase: true
+
+acrLoginServer: "acrbankofanthos8459.azurecr.io"
+imageTag: "dev"                   # loadgenerator's tag (no color)
+
+keyvaultName: "kv-boa-dev-8459"
+csiClientId: "114b2f02-ae88-4565-8203-65987120ae36"
+
+blueGreen:
+  activeColor: blue
+  images:
+    blue:  { tag: "dev" }         # CD overwrites the INACTIVE color with Build.BuildId
+    green: { tag: "dev" }
+
+previewService:
+  internalLoadBalancer: false     # dev: ClusterIP + port-forward, no ILB cost
+
+# # Dev image source
+# acrLoginServer: "acrbankofanthos8459.azurecr.io"
+# imageTag: "dev"
+
+# # Dev runs throwaway in-cluster Postgres (ADR-029)
+# inClusterDatabase: true
+
+# # Dev Key Vault + its CSI driver identity
+# keyvaultName: "kv-boa-dev-8459"
+# csiClientId: "114b2f02-ae88-4565-8203-65987120ae36"

@@ -1,0 +1,123 @@
+# charts/bank-of-anthos/values.yaml
+# Base chart defaults. FAIL-CLOSED: every environment-specific value is
+# empty here so a missing env values file breaks the render loudly
+# instead of silently deploying the wrong environment's config.
+
+# ---- Blue-Green deployment ----
+blueGreen:
+  enabled: true
+  activeColor: blue              # stable Service selector target; pipeline overrides on every deploy
+  colors: [blue, green]          # both always rendered
+  images:
+    blue:  { tag: "" }           # FAIL-CLOSED — env file must set
+    green: { tag: "" }
+
+# Non-colored workloads (loadgenerator only) use this single tag.
+imageTag: ""
+
+# Preview Service posture — internal ILB in staging/prod; dev uses ClusterIP.
+previewService:
+  enabled: true
+  internalLoadBalancer: false
+
+# ---- Image source ----
+acrLoginServer: ""
+imagePullPolicy: Always
+
+# ---- Database posture ----
+inClusterDatabase: false          # FAIL-CLOSED: base expects managed Postgres
+
+# ---- JWT via KV-CSI ----
+tenantId: "3d61c161-b515-4531-8ac0-34bfcdf6be81"
+keyvaultName: ""
+csiClientId: ""
+
+# ---- DB connection ----
+# Defaults are the in-cluster literals so dev (inClusterDatabase: true)
+# renders exactly as before PLAT-13.1. Managed envs override host/creds.
+accountsDb:
+  host: accounts-db
+  database: accounts-db
+  user: accounts-admin
+  password: accounts-pwd
+  sslmode: disable
+
+ledgerDb:
+  host: ledger-db
+  database: postgresdb
+  user: admin
+  password: admin
+  sslmode: disable
+
+# ---- Service topology ----
+# service: false -> no Kubernetes Service rendered, no color (loadgenerator)
+services:
+  frontend:            { port: 80,   containerPort: 8080, service: true }
+  contacts:            { port: 8080, containerPort: 8080, service: true }
+  userservice:         { port: 8080, containerPort: 8080, service: true }
+  balancereader:       { port: 8080, containerPort: 8080, service: true }
+  ledgerwriter:        { port: 8080, containerPort: 8080, service: true }
+  transactionhistory:  { port: 8080, containerPort: 8080, service: true }
+  loadgenerator:       { port: 0,    containerPort: 0,    service: false }
+
+# # Image source — env-specific, empty in base so a missing env file fails loudly.
+# acrLoginServer: ""
+# imageTag: ""
+# imagePullPolicy: Always
+
+# # FAIL-CLOSED: base expects managed Postgres. Dev opts into in-cluster.
+# inClusterDatabase: false
+
+# # JWT via KV-CSI. tenantId shared; vault + CSI identity per env.
+# tenantId: "3d61c161-b515-4531-8ac0-34bfcdf6be81"
+# keyvaultName: ""
+# csiClientId: ""
+
+# # DB connection. Defaults are the in-cluster literals so dev renders as before.
+# accountsDb:
+#   host: accounts-db
+#   database: accounts-db
+#   user: accounts-admin
+#   password: accounts-pwd
+#   sslmode: disable
+
+# ledgerDb:
+#   host: ledger-db
+#   database: postgresdb
+#   user: admin
+#   password: admin
+#   sslmode: disable
+
+# # # Image source — env-specific. Each env has its own ACR + tag.
+# # # Empty in base so a missing env file fails loudly rather than
+# # # silently deploying dev images somewhere wrong.
+# # acrLoginServer: ""
+# # imageTag: ""
+
+# # # Same everywhere — moving tags must always re-pull.
+# # imagePullPolicy: Always
+
+# # # DB posture — FAIL-CLOSED: base expects managed Postgres. Dev opts into in-cluster.
+# # inClusterDatabase: false
+
+# # # JWT via KV-CSI. tenantId shared; vault + CSI identity per env.
+# # tenantId: "3d61c161-b515-4531-8ac0-34bfcdf6be81"
+# # keyvaultName: ""
+# # csiClientId: ""
+
+# # # DB connection. Defaults are the in-cluster literals so dev (which flips
+# # # inClusterDatabase: true) renders exactly as before. Each env overrides host.
+# # accountsDb:
+# #   host: accounts-db
+# #   database: accounts-db
+# #   user: accounts-admin
+# #   password: accounts-pwd
+# #   sslmode: disable
+
+# # ledgerDb:
+# #   host: ledger-db
+# #   database: postgresdb
+# #   user: admin
+# #   password: admin
+# #   sslmode: disable
+

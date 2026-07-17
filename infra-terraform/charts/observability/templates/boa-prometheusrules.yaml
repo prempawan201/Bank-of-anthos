@@ -1,0 +1,52 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: boa-platform-rules
+  namespace: monitoring
+  labels:
+    release: observability
+spec:
+  groups:
+    - name: boa.pods
+      interval: 1m
+      rules:
+
+        - alert: BoAPodCrashLooping
+          expr: rate(kube_pod_container_status_restarts_total{namespace="boa"}[10m]) * 600 > 5
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "BoA pod is crash looping in namespace boa"
+            description: "A pod in namespace boa has restarted more than 5 times in 10 minutes."
+
+        - alert: BoAPodNotReady
+          expr: kube_pod_status_ready{namespace="boa", condition="true"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "BoA pod is not ready"
+            description: "A pod in namespace boa has been not ready for more than 5 minutes."
+
+        - alert: BoAContainerHighMemory
+          expr: |
+            (
+              container_memory_working_set_bytes{namespace="boa", container!=""}
+              / container_spec_memory_limit_bytes{namespace="boa", container!=""}
+            ) > 0.8
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "BoA container memory above 80% of limit"
+            description: "A container in namespace boa is using more than 80% of its memory limit."
+
+        - alert: BoAServiceDown
+          expr: kube_deployment_status_replicas_ready{namespace="boa"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "BoA service has no ready replicas"
+            description: "A deployment in namespace boa has zero ready replicas for more than 2 minutes."

@@ -1,0 +1,52 @@
+trigger:
+  branches:
+    include:
+      - develop
+  paths:
+    include:
+      - charts/fluent-bit/**
+
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  aksResourceGroup: rg-boa-workload-dev-eus2
+  aksClusterName: aks-boa-dev-eus2
+  releaseName: fluent-bit
+  namespace: monitoring
+  chartPath: charts/fluent-bit
+
+steps:
+  - checkout: self
+
+  - task: HelmInstaller@1
+    displayName: Install pinned Helm
+    inputs:
+      helmVersionToInstall: 3.16.2
+
+  - script: |
+      helm repo add fluent https://fluent.github.io/helm-charts
+      helm repo update
+      helm dependency build $(chartPath)
+    displayName: Vendor pinned Fluent Bit dependency
+
+  - task: HelmDeploy@0
+    displayName: Deploy Fluent Bit to dev AKS
+    inputs:
+      connectionType: Azure Resource Manager
+      azureSubscription: sc-boa-dev
+      azureResourceGroup: $(aksResourceGroup)
+      kubernetesCluster: $(aksClusterName)
+      namespace: $(namespace)
+      command: upgrade
+      chartType: FilePath
+      chartPath: $(chartPath)
+      releaseName: $(releaseName)
+      install: true
+      valueFile: $(chartPath)/values-dev.yaml
+      arguments: >-
+        --create-namespace
+        --wait
+        --timeout 5m

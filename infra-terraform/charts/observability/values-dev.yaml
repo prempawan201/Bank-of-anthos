@@ -1,0 +1,39 @@
+kube-prometheus-stack:
+
+  alertmanager:
+    config:
+      global:
+        resolve_timeout: 5m
+      route:
+        group_by: ['alertname', 'namespace']
+        group_wait: 10s
+        group_interval: 10s
+        repeat_interval: 1h
+        receiver: 'null'
+      receivers:
+        - name: 'null'
+
+  grafana:
+    service:
+      type: LoadBalancer
+    persistence:
+      enabled: false
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+
+  prometheus:
+    prometheusSpec:
+      replicas: 1
+      retention: 12h
+      retentionSize: ""
+      storageSpec: null
+      resources:
+        requests:
+          cpu: 200m
+          memory: 400Mi
+        limits:
+          memory: 1Gi

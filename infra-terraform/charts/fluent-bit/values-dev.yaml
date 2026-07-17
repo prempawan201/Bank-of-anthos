@@ -1,0 +1,14 @@
+fluent-bit:
+
+  envFrom:
+    - secretRef:
+        name: fluent-bit-la-secret
+
+  config:
+    outputs: |
+      [OUTPUT]
+          Name            azure
+          Match           *
+          Customer_ID     ${workspace-id}
+          Shared_Key      ${workspace-key}
+          Log_Type        boa_container_logs

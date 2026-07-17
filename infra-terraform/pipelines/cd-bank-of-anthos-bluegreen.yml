@@ -1,0 +1,82 @@
+# pipelines/cd-bank-of-anthos-bluegreen.yml
+trigger: none
+
+resources:
+  pipelines:
+    - pipeline: ci
+      source: frontend
+      trigger: true
+
+pool: boa-self-hosted            # dev private-API reach; matches project invariant
+
+variables:
+  - name: releaseName
+    value: bank-of-anthos
+  - name: namespace
+    value: boa
+  - name: chartPath
+    value: charts/bank-of-anthos
+
+steps:
+  - checkout: self
+
+  # 1. Determine the current active color from the live Service selector.
+  - task: AzureCLI@2
+    displayName: Resolve active/inactive color
+    inputs:
+      azureSubscription: sc-boa-dev
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        az aks get-credentials -g rg-boa-workload-dev-eus2 -n aks-boa-dev-eus2 --overwrite-existing
+        ACTIVE=$(kubectl -n $(namespace) get svc frontend \
+          -o jsonpath='{.spec.selector.color}')
+        ACTIVE=${ACTIVE:-blue}
+        if [ "$ACTIVE" = "blue" ]; then INACTIVE=green; else INACTIVE=blue; fi
+        echo "##vso[task.setvariable variable=ACTIVE_COLOR]$ACTIVE"
+        echo "##vso[task.setvariable variable=INACTIVE_COLOR]$INACTIVE"
+        echo "Active=$ACTIVE  Inactive=$INACTIVE  NewBuild=$(Build.BuildId)"
+
+  # 2. Deploy the new build ONLY to the inactive color; keep active color pinned.
+  - task: HelmDeploy@0
+    displayName: Helm upgrade (deploy to inactive color)
+    inputs:
+      connectionType: Azure Resource Manager
+      azureSubscription: sc-boa-dev
+      azureResourceGroup: rg-boa-workload-dev-eus2
+      kubernetesCluster: aks-boa-dev-eus2
+      namespace: $(namespace)
+      command: upgrade
+      chartType: FilePath
+      chartPath: $(chartPath)
+      releaseName: $(releaseName)
+      valueFile: $(chartPath)/values-dev.yaml
+      overrideValues: >-
+        blueGreen.activeColor=$(ACTIVE_COLOR)
+        blueGreen.images.$(INACTIVE_COLOR).tag=$(Build.BuildId)
+      arguments: --timeout 10m
+
+  # 3. Human gate — validate INACTIVE color via preview before cutover.
+  - task: ManualValidation@0
+    displayName: Approve cutover to $(INACTIVE_COLOR)
+    timeoutInMinutes: 60
+    inputs:
+      notifyUsers: prem@example.com
+      instructions: >-
+        Validate frontend-preview (color=$(INACTIVE_COLOR), build $(Build.BuildId)).
+        Approve to flip stable traffic. Reject to leave $(ACTIVE_COLOR) serving.
+
+  # 4. Atomic cutover — patch every stable Service selector to the new color.
+  - task: AzureCLI@2
+    displayName: Flip stable selector to $(INACTIVE_COLOR)
+    inputs:
+      azureSubscription: sc-boa-dev
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        az aks get-credentials -g rg-boa-workload-dev-eus2 -n aks-boa-dev-eus2 --overwrite-existing
+        for s in frontend contacts userservice balancereader ledgerwriter transactionhistory; do
+          kubectl -n $(namespace) patch svc $s --type=merge \
+            -p "{\"spec\":{\"selector\":{\"app\":\"$s\",\"color\":\"$(INACTIVE_COLOR)\"}}}"
+        done
+        echo "Cutover complete. Active color is now $(INACTIVE_COLOR)."

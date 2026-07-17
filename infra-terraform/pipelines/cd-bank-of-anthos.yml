@@ -1,0 +1,48 @@
+trigger: none
+
+resources:
+  pipelines:
+    - pipeline: frontend-ci
+      source: frontend
+      trigger: true
+    - pipeline: userservice-ci
+      source: userservice
+      trigger: true
+    - pipeline: contacts-ci
+      source: contacts
+      trigger: true
+    - pipeline: balancereader-ci
+      source: balancereader
+      trigger: true
+    - pipeline: ledgerwriter-ci
+      source: ledgerwriter
+      trigger: true
+    - pipeline: transactionhistory-ci
+      source: transactionhistory
+      trigger: true
+    - pipeline: loadgenerator-ci
+      source: loadgenerator
+      trigger: true
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - checkout: self
+
+  - task: HelmDeploy@0
+    displayName: Deploy Bank of Anthos to dev AKS
+    inputs:
+      connectionType: Azure Resource Manager
+      azureSubscription: sc-boa-dev
+      azureResourceGroup: rg-boa-workload-dev-eus2
+      kubernetesCluster: aks-boa-dev-eus2
+      namespace: boa
+      command: upgrade
+      chartType: filepath
+      chartPath: charts/bank-of-anthos
+      releaseName: boa
+      valueFile: charts/bank-of-anthos/values-dev.yaml
+      install: true
+      waitForExecution: true
+      arguments: --timeout 10m

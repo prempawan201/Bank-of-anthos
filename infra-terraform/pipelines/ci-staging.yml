@@ -1,0 +1,148 @@
+trigger: none
+pool: boa-self-hosted
+
+resources:
+  repositories:
+    - repository: infra
+      type: git
+      name: infra-terraform
+      ref: refs/heads/develop
+    - repository: frontend
+      type: git
+      name: frontend
+      ref: refs/heads/develop
+    - repository: userservice
+      type: git
+      name: userservice
+      ref: refs/heads/develop
+    - repository: contacts
+      type: git
+      name: contacts
+      ref: refs/heads/develop
+    - repository: balancereader
+      type: git
+      name: balancereader
+      ref: refs/heads/develop
+    - repository: ledgerwriter
+      type: git
+      name: ledgerwriter
+      ref: refs/heads/develop
+    - repository: transactionhistory
+      type: git
+      name: transactionhistory
+      ref: refs/heads/develop
+    - repository: loadgenerator
+      type: git
+      name: loadgenerator
+      ref: refs/heads/develop
+
+steps:
+  # ── Fix Docker socket permission on the self-hosted agent ──
+  # chmod 666 gives immediate access this run (no restart needed).
+  # usermod makes it permanent for future runs after agent restart.
+  - script: |
+      sudo chmod 666 /var/run/docker.sock
+      sudo usermod -aG docker azureuser || true
+      docker info >/dev/null && echo "Docker accessible"
+    displayName: 'Fix Docker socket permission'
+
+  - checkout: infra
+    path: infra
+  - checkout: frontend
+    path: frontend
+  - checkout: userservice
+    path: userservice
+  - checkout: contacts
+    path: contacts
+  - checkout: balancereader
+    path: balancereader
+  - checkout: ledgerwriter
+    path: ledgerwriter
+  - checkout: transactionhistory
+    path: transactionhistory
+  - checkout: loadgenerator
+    path: loadgenerator
+
+  - template: pipelines/templates/ci-service.yml@infra
+    parameters:
+      serviceName: 'frontend'
+      dockerfilePath: '$(Agent.BuildDirectory)/frontend/Dockerfile'
+      buildContext: '$(Agent.BuildDirectory)/frontend'
+      acrName: 'acrboastaging8459'
+      acrLoginServer: 'acrboastaging8459.azurecr.io'
+      dockerRegistryServiceConnection: 'sc-boa-acr-staging'
+      envTag: 'staging'
+      failOnVuln: '0'
+      runSonar: false
+
+  - template: pipelines/templates/ci-service.yml@infra
+    parameters:
+      serviceName: 'userservice'
+      dockerfilePath: '$(Agent.BuildDirectory)/userservice/Dockerfile'
+      buildContext: '$(Agent.BuildDirectory)/userservice'
+      acrName: 'acrboastaging8459'
+      acrLoginServer: 'acrboastaging8459.azurecr.io'
+      dockerRegistryServiceConnection: 'sc-boa-acr-staging'
+      envTag: 'staging'
+      failOnVuln: '0'
+      runSonar: false
+
+  - template: pipelines/templates/ci-service.yml@infra
+    parameters:
+      serviceName: 'contacts'
+      dockerfilePath: '$(Agent.BuildDirectory)/contacts/Dockerfile'
+      buildContext: '$(Agent.BuildDirectory)/contacts'
+      acrName: 'acrboastaging8459'
+      acrLoginServer: 'acrboastaging8459.azurecr.io'
+      dockerRegistryServiceConnection: 'sc-boa-acr-staging'
+      envTag: 'staging'
+      failOnVuln: '0'
+      runSonar: false
+
+  - template: pipelines/templates/ci-service.yml@infra
+    parameters:
+      serviceName: 'balancereader'
+      dockerfilePath: '$(Agent.BuildDirectory)/balancereader/Dockerfile'
+      buildContext: '$(Agent.BuildDirectory)/balancereader'
+      acrName: 'acrboastaging8459'
+      acrLoginServer: 'acrboastaging8459.azurecr.io'
+      dockerRegistryServiceConnection: 'sc-boa-acr-staging'
+      envTag: 'staging'
+      failOnVuln: '0'
+      runSonar: false
+
+  - template: pipelines/templates/ci-service.yml@infra
+    parameters:
+      serviceName: 'ledgerwriter'
+      dockerfilePath: '$(Agent.BuildDirectory)/ledgerwriter/Dockerfile'
+      buildContext: '$(Agent.BuildDirectory)/ledgerwriter'
+      acrName: 'acrboastaging8459'
+      acrLoginServer: 'acrboastaging8459.azurecr.io'
+      dockerRegistryServiceConnection: 'sc-boa-acr-staging'
+      envTag: 'staging'
+      failOnVuln: '0'
+      runSonar: false
+
+  - template: pipelines/templates/ci-service.yml@infra
+    parameters:
+      serviceName: 'transactionhistory'
+      dockerfilePath: '$(Agent.BuildDirectory)/transactionhistory/Dockerfile'
+      buildContext: '$(Agent.BuildDirectory)/transactionhistory'
+      acrName: 'acrboastaging8459'
+      acrLoginServer: 'acrboastaging8459.azurecr.io'
+      dockerRegistryServiceConnection: 'sc-boa-acr-staging'
+      envTag: 'staging'
+      failOnVuln: '0'
+      runSonar: false
+
+  - template: pipelines/templates/ci-service.yml@infra
+    parameters:
+      serviceName: 'loadgenerator'
+      dockerfilePath: '$(Agent.BuildDirectory)/loadgenerator/Dockerfile'
+      buildContext: '$(Agent.BuildDirectory)/loadgenerator'
+      acrName: 'acrboastaging8459'
+      acrLoginServer: 'acrboastaging8459.azurecr.io'
+      dockerRegistryServiceConnection: 'sc-boa-acr-staging'
+      envTag: 'staging'
+      failOnVuln: '0'
+      runSonar: false

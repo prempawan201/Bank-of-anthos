@@ -1,0 +1,121 @@
+trigger:
+  branches:
+    include:
+      - develop
+  paths:
+    include:
+      - ci-test/*
+      - pipelines/templates/ci-service.yml
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  acrLoginServer: acrbankofanthos8459.azurecr.io
+  dockerRegistryServiceConnection: sc-boa-acr-dev
+  serviceName: ci-test
+  imageTag: $(Build.BuildId)
+  envTag: dev
+
+steps:
+  # Step 1 — Build only
+  - task: Docker@2
+    displayName: 'Build $(serviceName):$(imageTag)'
+    inputs:
+      containerRegistry: '$(dockerRegistryServiceConnection)'
+      repository: '$(serviceName)'
+      command: build
+      Dockerfile: 'ci-test/Dockerfile'
+      buildContext: 'ci-test'
+      tags: |
+        $(imageTag)
+        $(envTag)
+      addPipelineData: true
+      addBaseImageData: true
+
+  # Step 2 — Trivy scan LOCAL image before push
+  - task: Trivy@1
+    displayName: 'Trivy scan $(serviceName):$(imageTag)'
+    inputs:
+      version: 'latest'
+      image: '$(acrLoginServer)/$(serviceName):$(imageTag)'
+      severities: 'HIGH,CRITICAL'
+      ignoreUnfixed: true
+      exitCode: 0
+
+  # Step 3 — SonarQube stub (activated at PLAT-12)
+  - script: echo "SonarQube stub — activated at PLAT-12"
+    displayName: 'SonarQube (stub)'
+
+  # Step 4 — Push BuildId tag + dev alias (Trivy passed, safe to push)
+  - task: Docker@2
+    displayName: 'Push $(serviceName):$(imageTag) and :$(envTag)'
+    inputs:
+      containerRegistry: '$(dockerRegistryServiceConnection)'
+      repository: '$(serviceName)'
+      command: push
+      tags: |
+        $(imageTag)
+        $(envTag)
+
+# # ci-test.yml — true flat format
+# trigger:
+#   branches:
+#     include:
+#       - develop
+#   paths:
+#     include:
+#       - ci-test/*
+#       - pipelines/templates/ci-service.yml
+
+# pool:
+#   vmImage: ubuntu-latest
+
+# variables:
+#   acrName: acrbankofanthos8459
+#   acrLoginServer: acrbankofanthos8459.azurecr.io
+#   azureSubscription: sc-boa-dev
+#   serviceName: ci-test
+#   imageTag: $(Build.BuildId)
+
+# steps:
+
+#   # Step 1 — Build image locally (no push yet)
+#   - task: Docker@2
+#     displayName: 'Build $(serviceName):$(imageTag)'
+#     inputs:
+#       command: build
+#       repository: '$(acrLoginServer)/$(serviceName)'
+#       dockerfile: 'ci-test/Dockerfile'
+#       buildContext: 'ci-test'
+#       tags: |
+#         $(imageTag)
+#       arguments: >-
+#         --label org.opencontainers.image.revision=$(Build.SourceVersion)
+#         --label org.opencontainers.image.source=$(Build.Repository.Uri)
+
+#   # Step 2 — Trivy scan LOCAL image before it reaches the registry
+#   - task: Trivy@1
+#     displayName: 'Trivy scan $(serviceName):$(imageTag)'
+#     inputs:
+#       version: 'latest'
+#       image: '$(acrLoginServer)/$(serviceName):$(imageTag)'
+#       severities: 'HIGH,CRITICAL'
+#       ignoreUnfixed: true
+#       exitCode: '0' # '0' means the task will not fail the pipeline even if vulnerabilities are found; '1' would fail the pipeline on vulnerabilities, and '2' would fail on Trivy errors. Adjust as needed for your policy.
+
+#   # Step 3 — SonarQube stub (activated at PLAT-12)
+#   - script: echo "SonarQube stub — activated at PLAT-12"
+#     displayName: 'SonarQube (stub)'
+
+#   # Step 4 — Login to ACR via WIF and push
+#   - task: AzureCLI@2
+#     displayName: 'Push $(serviceName):$(imageTag) to ACR (WIF)'
+#     inputs:
+#       azureSubscription: '$(azureSubscription)'
+#       scriptType: 'bash'
+#       scriptLocation: 'inlineScript'
+#       inlineScript: |
+#         set -euo pipefail
+#         az acr login --name $(acrName)
+#         docker push $(acrLoginServer)/$(serviceName):$(imageTag)

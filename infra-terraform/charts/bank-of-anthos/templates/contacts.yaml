@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: contacts
+spec:
+  selector:
+    matchLabels:
+      app: contacts
+  template:
+    metadata:
+      labels:
+        app: contacts
+    spec:
+      serviceAccountName: default
+      containers:
+        - name: contacts
+          image: "{{ .Values.acrLoginServer }}/contacts:{{ .Values.imageTag }}"
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef: { name: environment-config }
+            - configMapRef: { name: accounts-db-config }
+          env:
+            - { name: PORT, value: "8080" }
+            - { name: ENABLE_TRACING, value: "false" }
+            - { name: ENABLE_METRICS, value: "false" }
+            - { name: LOG_LEVEL, value: "info" }
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: keys
+              mountPath: /root/.ssh
+              readOnly: true
+            # - { name: publickey, mountPath: /root/.ssh, readOnly: true }
+      volumes:
+          - name: keys
+            csi:
+              driver: secrets-store.csi.k8s.io
+              readOnly: true
+              volumeAttributes:
+                secretProviderClass: jwt-key-provider
+        # - name: publickey
+        #   secret:
+        #     secretName: jwt-key
+        #     items:
+        #       - { key: jwtRS256.key.pub, path: publickey }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: contacts
+spec:
+  type: ClusterIP
+  selector:
+    app: contacts
+  ports:
+    - port: 8080
+      targetPort: 8080

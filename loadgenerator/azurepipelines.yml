@@ -1,0 +1,21 @@
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+
+resources:
+  repositories:
+    - repository: infra
+      type: git
+      name: bank-of-anthos-platform/infra-terraform
+      ref: refs/heads/main
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - template: pipelines/templates/ci-service.yml@infra
+    parameters:
+      serviceName: loadgenerator
+      dockerfilePath: Dockerfile
